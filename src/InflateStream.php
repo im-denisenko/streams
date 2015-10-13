@@ -16,10 +16,43 @@ class InflateStream implements StreamInterface
 {
     use StreamDecoratorTrait;
 
+    const FLAG_FTEXT = 0b00000001;
+    const FLAG_FHCRC = 0b00000010;
+    const FLAG_FEXTRA = 0b00000100;
+    const FLAG_FNAME = 0b00001000;
+    const FLAG_FCOMMENT = 0b00010000;
+
     public function __construct(StreamInterface $stream)
     {
-        // Skip the first 10 bytes
-        $stream = new LimitStream($stream, -1, 10);
+        $skip = 10;
+
+        $header = str_split(bin2hex($stream->read(10)), 2);
+        $flags = hexdec($header[3]);
+
+        if ($flags & static::FLAG_FEXTRA) {
+            $xlen = bindec($stream->read(2));
+            $skip += $xlen;
+            $stream->read($xlen);
+        }
+
+        if ($flags & static::FLAG_FNAME) {
+            do {
+                ++$skip;
+            } while ($stream->read(1) !== "\0");
+        }
+
+        if ($flags & static::FLAG_FCOMMENT) {
+            do {
+                ++$skip;
+            } while ($stream->read(1) !== "\0");
+        }
+
+        if ($flags & static::FLAG_FHCRC) {
+            $skip += 2;
+            $stream->read(2);
+        }
+
+        $stream = new LimitStream($stream, -1, $skip);
         $resource = GuzzleStreamWrapper::getResource($stream);
         stream_filter_append($resource, 'zlib.inflate', STREAM_FILTER_READ);
         $this->stream = new Stream($resource);
